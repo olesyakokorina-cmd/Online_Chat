@@ -82,7 +82,7 @@ bool ChatServer::handleAuth(const Protocol::Message& msg,
         std::lock_guard<std::mutex> lock(userdb_mutex_);
         auto it = userDatabase_.find(username);
 
-        if (it != userDatabase.end()) {
+        if (it != userDatabase_.end()) {
             if (it->second != password) {
                 Protocol::sendMessage(*sock, Protocol::makeError("Wrong password for user '" + username + "'"));
                 return false;
