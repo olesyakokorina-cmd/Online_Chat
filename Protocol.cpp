@@ -112,8 +112,8 @@ bool recvMessage(SimpleNet::Socket& sock, Message& out) {
     return true;
 }
  
-Message makeAuth(const std::string& username) {
-    return { MessageType::AUTH, username, "", "" };
+Message makeAuth(const std::string& username, const std::string& password) {
+    return { MessageType::AUTH, username, "", password };
 }
  
 Message makeText(const std::string& from, const std::string& to, const std::string& body) {

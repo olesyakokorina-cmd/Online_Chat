@@ -29,7 +29,7 @@ void sendMessage(SimpleNet::Socket& sock, const Message& msg);
 
 bool recvMessage(SimpleNet::Socket& sock, Message& out);
  
-Message makeAuth(const std::string& username);
+Message makeAuth(const std::string& username, const std::string& password);
 Message makeText(const std::string& from, const std::string& to, const std::string& body);
 Message makeSystem(const std::string& body);
 Message makeError(const std::string& reason);
