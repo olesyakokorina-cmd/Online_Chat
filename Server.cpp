@@ -79,8 +79,8 @@ bool ChatServer::handleAuth(const Protocol::Message& msg,
     }
 
     {
-        std::lock_guard<std::mutex> lock(userdb_mutex);
-        auto it = userDatabase.find(username);
+        std::lock_guard<std::mutex> lock(userdb_mutex_);
+        auto it = userDatabase_.find(username);
 
         if (it != userDatabase.end()) {
             if (it->second != password) {
@@ -88,7 +88,7 @@ bool ChatServer::handleAuth(const Protocol::Message& msg,
                 return false;
             }
         } else {
-            userDatabase[username] = password;
+            userDatabase_[username] = password;
         }
     }
 
