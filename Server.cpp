@@ -1,4 +1,5 @@
 #include "Server.hpp"
+#include "Crypto.hpp"
 #include <iostream>
  
 namespace Chat {
@@ -7,8 +8,6 @@ ChatServer::ChatServer(int port)
     : tcp_server_(port)
 {
     std::cout << "[Server] Started on port " << port << "\n";
-
-    sqlite3_open("../data/chat.db", &db_); // открывает (или создаёт, если не существует) файл базы данных chat.db и сохраняет указатель на базу данных в переменной db_
 
     if (sqlite3_open("../data/chat.db", &db_) != SQLITE_OK) { //SQLITE_OK == 0
         std::cerr << "Cannot open DB\n";
@@ -105,6 +104,8 @@ bool ChatServer::handleLogin(const Protocol::Message& msg,
     std::string username = msg.from;
     std::string password = msg.body;
 
+    password = sha256(password);
+
     {
         std::lock_guard<std::mutex> lock(clients_mutex_);
 
@@ -172,6 +173,8 @@ bool ChatServer::handleRegister(const Protocol::Message& msg,
 
     std::string username = msg.from;
     std::string password = msg.body;
+
+    password = sha256(password);
 
     {
         std::lock_guard<std::mutex> lock(clients_mutex_);
