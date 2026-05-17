@@ -16,4 +16,8 @@ add_executable(chat
 
 # Подключаем потоки (нужны для std::thread и std::mutex)
 find_package(Threads REQUIRED)
-target_link_libraries(chat Threads::Threads)
+find_package(SQLite3 REQUIRED)
+
+target_link_libraries(chat PRIVATE 
+Threads::Threads
+SQLite::SQLite3)

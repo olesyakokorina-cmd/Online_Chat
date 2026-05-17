@@ -25,7 +25,8 @@ static std::string decodeField(const std::string& raw, size_t& pos) {
  
 static std::string typeToString(MessageType type) {
     switch (type) {
-        case MessageType::AUTH:   return "AUTH";
+        case MessageType::LOGIN:   return "LOGIN";
+        case MessageType::REGISTER: return "REGISTER";
         case MessageType::TEXT:   return "TEXT";
         case MessageType::SYSTEM: return "SYSTEM";
         case MessageType::ERROR:  return "ERROR";
@@ -34,7 +35,8 @@ static std::string typeToString(MessageType type) {
 }
  
 static MessageType stringToType(const std::string& s) {
-    if (s == "AUTH")   return MessageType::AUTH;
+    if (s == "LOGIN")   return MessageType::LOGIN;
+    if (s == "REGISTER") return MessageType::REGISTER;
     if (s == "TEXT")   return MessageType::TEXT;
     if (s == "SYSTEM") return MessageType::SYSTEM;
     if (s == "ERROR")  return MessageType::ERROR;
@@ -112,8 +114,12 @@ bool recvMessage(SimpleNet::Socket& sock, Message& out) {
     return true;
 }
  
-Message makeAuth(const std::string& username, const std::string& password) {
-    return { MessageType::AUTH, username, "", password };
+Message makeLogin(const std::string& username, const std::string& password) {
+    return { MessageType::LOGIN, username, "", password };
+}
+ 
+Message makeRegister(const std::string& username, const std::string& password) {
+    return { MessageType::REGISTER, username, "", password };
 }
  
 Message makeText(const std::string& from, const std::string& to, const std::string& body) {

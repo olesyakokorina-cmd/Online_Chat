@@ -7,7 +7,8 @@
 namespace Protocol {
 
 enum class MessageType {
-    AUTH,
+    LOGIN,
+    REGISTER,
     TEXT,
     SYSTEM,
     ERROR
@@ -22,14 +23,14 @@ struct Message {
 
 std::string serialize(const Message& msg);
  
-
 Message deserialize(const std::string& raw);
 
 void sendMessage(SimpleNet::Socket& sock, const Message& msg);
 
 bool recvMessage(SimpleNet::Socket& sock, Message& out);
  
-Message makeAuth(const std::string& username, const std::string& password);
+Message makeLogin(const std::string& username, const std::string& password);
+Message makeRegister(const std::string& username, const std::string& password);
 Message makeText(const std::string& from, const std::string& to, const std::string& body);
 Message makeSystem(const std::string& body);
 Message makeError(const std::string& reason);

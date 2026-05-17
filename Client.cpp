@@ -10,17 +10,56 @@ ChatClient::ChatClient(const std::string& host, int port, const std::string& use
     , port_(port)
     , username_(username)
     , running_(true)
-{}
+{
+    if (username_.empty()) {
+        throw std::runtime_error("Username cannot be empty");
+    }
+}
 
 void ChatClient::run() {
     socket_.connect(host_, port_);
     std::cout << "Connected to " << host_ << ":" << port_ << "\n";
 
+
+    std::string choice;
+    std::cout << "1) Login\n";
+    std::cout << "2) Register\n";
+    std::cout << "Choose: ";
+    std::getline(std::cin, choice);
+
+    while (choice != "1" && choice != "2") {
+        std::cout << "Invalid choice. Choose 1 or 2: ";
+        std::getline(std::cin, choice);
+    }
+
     std::string password;
     std::cout << "Enter password: ";
     std::getline(std::cin, password);
 
-    Protocol::sendMessage(socket_, Protocol::makeAuth(username_, password));
+    while (password.empty()) {
+        std::cout << "Password cannot be empty. Try again: ";
+        std::getline(std::cin, password);
+    }
+
+    if (choice == "1") {
+        Protocol::sendMessage(socket_, Protocol::makeLogin(username_, password));
+    }
+    else {
+        Protocol::sendMessage(socket_, Protocol::makeRegister(username_, password));
+    }
+
+    Protocol::Message response;
+
+    if (!Protocol::recvMessage(socket_, response)) {
+        std::cout << "[Error] No response from server\n";
+        return;
+    }
+
+    printMessage(response);
+
+    if (response.type == Protocol::MessageType::ERROR) {
+        return;
+    }
 
     std::thread recv_thread([this]() {
         receiveLoop();

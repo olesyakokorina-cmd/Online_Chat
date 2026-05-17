@@ -7,6 +7,32 @@ ChatServer::ChatServer(int port)
     : tcp_server_(port)
 {
     std::cout << "[Server] Started on port " << port << "\n";
+
+    sqlite3_open("../data/chat.db", &db_); // открывает (или создаёт, если не существует) файл базы данных chat.db и сохраняет указатель на базу данных в переменной db_
+
+    if (sqlite3_open("../data/chat.db", &db_) != SQLITE_OK) { //SQLITE_OK == 0
+        std::cerr << "Cannot open DB\n";
+    }
+
+    const char* sql = R"( 
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT
+        );
+    )";
+
+    char* err = nullptr;
+    if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
+        std::cerr << "SQL error: " << err << "\n";
+        sqlite3_free(err);
+    }
+}
+
+ChatServer::~ChatServer() {
+    if (db_) {
+        sqlite3_close(db_);
+    }
 }
 
 void ChatServer::run() {
@@ -24,16 +50,25 @@ void ChatServer::handleClient(SimpleNet::Socket client) {
         return;  
     }
  
-    if (auth_msg.type != Protocol::MessageType::AUTH) {
-        Protocol::sendMessage(*sock, Protocol::makeError("First message must be AUTH"));
+    bool ok = false;
+
+    if (auth_msg.type == Protocol::MessageType::LOGIN) {
+        ok = handleLogin(auth_msg, sock);
+    }
+    else if (auth_msg.type == Protocol::MessageType::REGISTER) {
+        ok = handleRegister(auth_msg, sock);
+    }
+    else {
+        Protocol::sendMessage(*sock,
+            Protocol::makeError("First message must be LOGIN or REGISTER"));
+        return;
+    }
+
+    if (!ok) {
         return;
     }
  
     std::string username = auth_msg.from;
- 
-    if (!handleAuth(auth_msg, sock)) {
-        return;  
-    }
  
     std::cout << "[Server] " << username << " connected\n";
  
@@ -64,42 +99,158 @@ void ChatServer::handleClient(SimpleNet::Socket client) {
     broadcast(Protocol::makeSystem(username + " left the chat"));
 }
 
-//  handleAuth() — регистрация клиента
-bool ChatServer::handleAuth(const Protocol::Message& msg,
-                            std::shared_ptr<SimpleNet::Socket> sock) {
+bool ChatServer::handleLogin(const Protocol::Message& msg,
+                             std::shared_ptr<SimpleNet::Socket> sock) {
+
     std::string username = msg.from;
     std::string password = msg.body;
 
     {
         std::lock_guard<std::mutex> lock(clients_mutex_);
+
         if (clients_.count(username)) {
-            Protocol::sendMessage(*sock, Protocol::makeError("Username '" + username + "' is already connected"));
+            Protocol::sendMessage(*sock,
+                Protocol::makeError("User already online"));
+
             return false;
         }
     }
 
-    {
-        std::lock_guard<std::mutex> lock(userdb_mutex_);
-        auto it = userDatabase_.find(username);
+    std::lock_guard<std::mutex> db_lock(db_mutex_);
 
-        if (it != userDatabase.end()) {
-            if (it->second != password) {
-                Protocol::sendMessage(*sock, Protocol::makeError("Wrong password for user '" + username + "'"));
-                return false;
-            }
-        } else {
-            userDatabase_[username] = password;
-        }
+    sqlite3_stmt* stmt;
+
+    const char* sql =
+        "SELECT password FROM users WHERE username = ?;";
+
+    sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+
+    sqlite3_bind_text(stmt, 1,
+        username.c_str(),
+        -1,
+        SQLITE_TRANSIENT);
+
+    if (sqlite3_step(stmt) != SQLITE_ROW) {
+
+        sqlite3_finalize(stmt);
+
+        Protocol::sendMessage(*sock,
+            Protocol::makeError("User not found"));
+
+        return false;
     }
 
-    // Добавляем в список подключённых
+    std::string db_pass =
+        reinterpret_cast<const char*>(
+            sqlite3_column_text(stmt, 0));
+
+    sqlite3_finalize(stmt);
+
+    if (db_pass != password) {
+
+        Protocol::sendMessage(*sock,
+            Protocol::makeError("Wrong password"));
+
+        return false;
+    }
+
     {
         std::lock_guard<std::mutex> lock(clients_mutex_);
-        clients_[username] = ClientInfo{ username, sock };
+
+        clients_[username] =
+            ClientInfo{ username, sock };
     }
 
     Protocol::sendMessage(*sock,
-        Protocol::makeSystem("Welcome, " + username + "! Commands: /all <text> or /dm <name> <text>"));
+        Protocol::makeSystem("Welcome, " + username + "!"));
+
+    return true;
+}
+
+bool ChatServer::handleRegister(const Protocol::Message& msg,
+                                std::shared_ptr<SimpleNet::Socket> sock) {
+
+    std::string username = msg.from;
+    std::string password = msg.body;
+
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex_);
+
+        if (clients_.count(username)) {
+
+            Protocol::sendMessage(*sock,
+                Protocol::makeError("User already online"));
+
+            return false;
+        }
+    }
+
+    std::lock_guard<std::mutex> db_lock(db_mutex_);
+
+    sqlite3_stmt* stmt;
+
+    const char* check_sql =
+        "SELECT 1 FROM users WHERE username = ?;";
+
+    sqlite3_prepare_v2(db_, check_sql,
+        -1, &stmt, nullptr);
+
+    sqlite3_bind_text(stmt, 1,
+        username.c_str(),
+        -1,
+        SQLITE_TRANSIENT);
+
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+
+        sqlite3_finalize(stmt);
+
+        Protocol::sendMessage(*sock,
+            Protocol::makeError("User already exists"));
+
+        return false;
+    }
+
+    sqlite3_finalize(stmt);
+
+    const char* insert_sql =
+        "INSERT INTO users(username, password) VALUES(?, ?);";
+
+    sqlite3_prepare_v2(db_, insert_sql,
+        -1, &stmt, nullptr);
+
+    sqlite3_bind_text(stmt, 1,
+        username.c_str(),
+        -1,
+        SQLITE_TRANSIENT);
+
+    sqlite3_bind_text(stmt, 2,
+        password.c_str(),
+        -1,
+        SQLITE_TRANSIENT);
+
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+
+        sqlite3_finalize(stmt);
+
+        Protocol::sendMessage(*sock,
+            Protocol::makeError("DB error"));
+
+        return false;
+    }
+
+    sqlite3_finalize(stmt);
+
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex_);
+
+        clients_[username] =
+            ClientInfo{ username, sock };
+    }
+
+    Protocol::sendMessage(*sock,
+        Protocol::makeSystem(
+            "Registered and logged in as " + username));
+
     return true;
 }
  
