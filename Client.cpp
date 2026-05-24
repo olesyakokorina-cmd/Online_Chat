@@ -87,8 +87,13 @@ void ChatClient::receiveLoop() {
 //  sendLoop() — чтение ввода и отправка сообщений
 void ChatClient::sendLoop() {
     std::cout << "Commands:\n";
-    std::cout << "  /all <text>        - send to everyone\n";
+    std::cout << "  /all <text>        .- send to everyone\n";
     std::cout << "  /dm <name> <text>  - send private message\n";
+    std::cout << "  /join <room>       - switch chat room\n";
+    std::cout << "  /leave             - return to general room\n";
+    std::cout << "  /create <room>     - create public room\n";
+    std::cout << "  /create_private <room> <code> - create private room\n";
+    std::cout << "  /rooms             - list available rooms\n";
     std::cout << "  /quit              - exit\n\n";
  
     std::string input;
@@ -121,8 +126,51 @@ bool ChatClient::parseInput(const std::string& input, Protocol::Message& out) {
     std::istringstream iss(input);
     std::string command;
     iss >> command; 
- 
-    if (command == "/all") {
+    
+    if (command == "/join") {
+        std::string room;
+        std::string code;
+
+        iss >> room >> code;
+
+        if (room.empty()) {
+            std::cout << "[Error] Usage: /join <room> [code]\n";
+            return false;
+        }
+
+        out = Protocol::makeJoin(username_, room, code);
+
+        return true;
+    } else if (command == "/leave") {
+        out = Protocol::makeJoin(username_, "general", "");
+        current_room_ = "general";
+        return true;
+    } else if (command == "/rooms") {
+        out = Protocol::makeRoomsRequest(username_);
+        return true;
+    } else if (command == "/create") {
+        std::string room;
+        iss >> room;
+
+        if (room.empty()) {
+            std::cout << "[Error] Usage: /create <room>\n";
+            return false;
+        }
+
+        out = Protocol::makeCreateRoom(username_, room);
+        return true;
+    } else if (command == "/create_private") {
+        std::string room, code;
+        iss >> room >> code;
+
+        if (room.empty() || code.empty()) {
+            std::cout << "[Error] Usage: /create_private <room> <code>\n";
+            return false;
+        }
+
+        out = Protocol::makeCreatePrivateRoom(username_, room, code);
+        return true;
+    } else if (command == "/all") {
         std::string text;
         std::getline(iss, text);
  
@@ -133,7 +181,7 @@ bool ChatClient::parseInput(const std::string& input, Protocol::Message& out) {
             return false;
         }
  
-        out = Protocol::makeText(username_, "ALL", text);
+        out = Protocol::makeText(username_, "ALL", current_room_, text);
         return true;
  
     } else if (command == "/dm") {
@@ -154,7 +202,7 @@ bool ChatClient::parseInput(const std::string& input, Protocol::Message& out) {
             return false;
         }
  
-        out = Protocol::makeText(username_, to, text);
+        out = Protocol::makeText(username_, to, current_room_, text);
         return true;
  
     } else {
@@ -177,10 +225,10 @@ void ChatClient::printMessage(const Protocol::Message& msg) {
         case Protocol::MessageType::TEXT:
             if (msg.to == "ALL") {
                 // Групповое сообщение
-                std::cout << "[" << msg.from << "] " << msg.body << "\n";
+                std::cout << "[" << msg.from << "] " << "[" << msg.from << "] " << msg.body << "\n";
             } else {
                 // Личное сообщение
-                std::cout << "[DM] " << msg.from << " → " << msg.to
+                std::cout << "[DM][" << msg.room << "] " << msg.from << " → " << msg.to
                           << ": " << msg.body << "\n";
             }
             break;

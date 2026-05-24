@@ -21,10 +21,36 @@ ChatServer::ChatServer(int port)
         );
     )";
 
+    const char* rooms_sql = R"(
+        CREATE TABLE IF NOT EXISTS rooms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            is_private INTEGER NOT NULL DEFAULT 0,
+            password TEXT
+        );
+    )";
+
     char* err = nullptr;
     if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
         std::cerr << "SQL error: " << err << "\n";
         sqlite3_free(err);
+    }
+
+    char* rooms_err = nullptr;
+    if (sqlite3_exec(db_, rooms_sql, nullptr, nullptr, &rooms_err) != SQLITE_OK) {
+        std::cerr << "Rooms SQL error: " << rooms_err << "\n";
+        sqlite3_free(rooms_err);
+    }
+
+    const char* default_room_sql = R"(
+        INSERT OR IGNORE INTO rooms(name, is_private, password)
+        VALUES ('general', 0, NULL);
+    )";
+
+    char* default_room_err = nullptr;
+    if (sqlite3_exec(db_, default_room_sql, nullptr, nullptr, &default_room_err) != SQLITE_OK) {
+        std::cerr << "Default room SQL error: " << default_room_err << "\n";
+        sqlite3_free(default_room_err);
     }
 }
 
@@ -83,6 +109,19 @@ void ChatServer::handleClient(SimpleNet::Socket client) {
         switch (msg.type) {
             case Protocol::MessageType::TEXT:
                 handleText(msg);
+                break;
+            case Protocol::MessageType::JOIN:
+                handleJoin(msg);
+                break;
+            case Protocol::MessageType::ROOMS:
+                handleRooms(sock);
+                break;
+            case Protocol::MessageType::CREATE_ROOM:
+                handleCreateRoom(msg, false);
+                break;
+
+            case Protocol::MessageType::CREATE_PRIVATE_ROOM:
+                handleCreateRoom(msg, true);
                 break;
             default:
                 break;
@@ -159,7 +198,7 @@ bool ChatServer::handleLogin(const Protocol::Message& msg,
         std::lock_guard<std::mutex> lock(clients_mutex_);
 
         clients_[username] =
-            ClientInfo{ username, sock };
+            ClientInfo{ username, "general", sock };
     }
 
     Protocol::sendMessage(*sock,
@@ -247,7 +286,7 @@ bool ChatServer::handleRegister(const Protocol::Message& msg,
         std::lock_guard<std::mutex> lock(clients_mutex_);
 
         clients_[username] =
-            ClientInfo{ username, sock };
+            ClientInfo{ username, "general", sock };
     }
 
     Protocol::sendMessage(*sock,
@@ -256,25 +295,230 @@ bool ChatServer::handleRegister(const Protocol::Message& msg,
 
     return true;
 }
- 
+
+void ChatServer::handleJoin(const Protocol::Message& msg) {
+    std::string username = msg.from;
+    std::string room = msg.room;
+    std::string code = msg.body;
+
+    std::lock_guard<std::mutex> db_lock(db_mutex_);
+
+    sqlite3_stmt* stmt;
+
+    const char* sql =
+        "SELECT is_private, password FROM rooms WHERE name = ?;";
+
+    sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+
+    sqlite3_bind_text(stmt, 1,
+        room.c_str(),
+        -1,
+        SQLITE_TRANSIENT);
+
+    if (sqlite3_step(stmt) != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+
+        std::lock_guard<std::mutex> lock(clients_mutex_);
+        auto it = clients_.find(username);
+
+        if (it != clients_.end()) {
+            Protocol::sendMessage(
+                *it->second.socket,
+                Protocol::makeError("Room not found: " + room)
+            );
+        }
+
+        return;
+    }
+
+    int is_private = sqlite3_column_int(stmt, 0);
+
+    const unsigned char* db_code_raw =
+        sqlite3_column_text(stmt, 1);
+
+    std::string db_code =
+        db_code_raw ? reinterpret_cast<const char*>(db_code_raw) : "";
+
+    sqlite3_finalize(stmt);
+
+    if (is_private && db_code != code) {
+        std::lock_guard<std::mutex> lock(clients_mutex_);
+        auto it = clients_.find(username);
+
+        if (it != clients_.end()) {
+            Protocol::sendMessage(
+                *it->second.socket,
+                Protocol::makeError("Wrong room code")
+            );
+        }
+
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex_);
+
+        auto it = clients_.find(username);
+        if (it == clients_.end()) {
+            return;
+        }
+
+        it->second.room = room;
+
+        Protocol::sendMessage(
+            *it->second.socket,
+            Protocol::makeSystem("You joined room: " + room)
+        );
+    }
+}
+
+void ChatServer::handleRooms(
+    std::shared_ptr<SimpleNet::Socket> sock) {
+
+    std::lock_guard<std::mutex> db_lock(db_mutex_);
+
+    sqlite3_stmt* stmt;
+
+    const char* sql =
+        "SELECT name, is_private FROM rooms;";
+
+    sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+
+    std::string result = "Rooms:\n";
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+
+        std::string room =
+            reinterpret_cast<const char*>(
+                sqlite3_column_text(stmt, 0));
+
+        int is_private =
+            sqlite3_column_int(stmt, 1);
+
+        result += "- " + room;
+
+        if (is_private) {
+            result += " (private)";
+        }
+
+        result += "\n";
+    }
+
+    sqlite3_finalize(stmt);
+
+    Protocol::sendMessage(
+        *sock,
+        Protocol::makeSystem(result)
+    );
+}
+
+void ChatServer::handleCreateRoom(const Protocol::Message& msg, bool isPrivate) {
+    std::lock_guard<std::mutex> db_lock(db_mutex_);
+
+    sqlite3_stmt* stmt;
+
+    const char* sql =
+        "INSERT INTO rooms(name, is_private, password) VALUES(?, ?, ?);";
+
+    sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+
+    sqlite3_bind_text(stmt, 1, msg.room.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, isPrivate ? 1 : 0);
+
+    if (isPrivate) {
+        sqlite3_bind_text(stmt, 3, msg.body.c_str(), -1, SQLITE_TRANSIENT);
+    } else {
+        sqlite3_bind_null(stmt, 3);
+    }
+
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        sqlite3_finalize(stmt);
+
+        auto it = clients_.find(msg.from);
+        if (it != clients_.end()) {
+            Protocol::sendMessage(
+                *it->second.socket,
+                Protocol::makeError("Room already exists or DB error")
+            );
+        }
+
+        return;
+    }
+
+    sqlite3_finalize(stmt);
+
+    auto it = clients_.find(msg.from);
+    if (it != clients_.end()) {
+        Protocol::sendMessage(
+            *it->second.socket,
+            Protocol::makeSystem("Room created: " + msg.room)
+        );
+    }
+}
+
 //  handleText() — обработка текстового сообщения
 void ChatServer::handleText(const Protocol::Message& msg) {
     if (msg.to == "ALL") {
-        broadcast(msg);
+        std::string senderRoom;
+
+        {
+            std::lock_guard<std::mutex> lock(clients_mutex_);
+
+            auto it = clients_.find(msg.from);
+            if (it == clients_.end()) {
+                return;
+            }
+
+            senderRoom = it->second.room;
+        }
+
+        Protocol::Message roomMsg = msg;
+        roomMsg.room = senderRoom;
+
+        broadcastToRoom(senderRoom, roomMsg);
     } else {
-        bool found = sendTo(msg.to, msg);
- 
-        if (!found) {
+        std::shared_ptr<SimpleNet::Socket> senderSocket;
+        std::string senderRoom;
+        std::string receiverRoom;
+
+        {
             std::lock_guard<std::mutex> lock(clients_mutex_);
-            if (clients_.count(msg.from)) {
-                Protocol::sendMessage(*clients_[msg.from].socket,
-                    Protocol::makeError("User '" + msg.to + "' not found"));
+
+            auto senderIt = clients_.find(msg.from);
+            if (senderIt == clients_.end()) {
+                return;
             }
-        } else {
-            std::lock_guard<std::mutex> lock(clients_mutex_);
-            if (clients_.count(msg.from)) {
-                Protocol::sendMessage(*clients_[msg.from].socket, msg);
+
+            senderSocket = senderIt->second.socket;
+            senderRoom = senderIt->second.room;
+
+            auto receiverIt = clients_.find(msg.to);
+            if (receiverIt == clients_.end()) {
+                Protocol::sendMessage(
+                    *senderSocket,
+                    Protocol::makeError("User '" + msg.to + "' not found")
+                );
+                return;
             }
+
+            receiverRoom = receiverIt->second.room;
+        }
+
+        if (senderRoom != receiverRoom) {
+            Protocol::sendMessage(
+                *senderSocket,
+                Protocol::makeError("User '" + msg.to + "' is not in your room")
+            );
+            return;
+        }
+
+        Protocol::Message roomMsg = msg;
+        roomMsg.room = senderRoom;
+
+        bool found = sendTo(msg.to, roomMsg);
+
+        if (found) {
+            Protocol::sendMessage(*senderSocket, roomMsg);
         }
     }
 }
@@ -288,6 +532,19 @@ void ChatServer::broadcast(const Protocol::Message& msg) {
         } catch (...) {
             // Клиент отключился — пропускаем
         }
+    }
+}
+
+void ChatServer::broadcastToRoom(const std::string& room,
+                                 const Protocol::Message& msg) {
+    std::lock_guard<std::mutex> lock(clients_mutex_);
+
+    for (auto& [name, info] : clients_) {
+        if (info.room != room) {
+            continue;
+        }
+        
+        Protocol::sendMessage(*info.socket, msg);
     }
 }
 

@@ -13,6 +13,7 @@ namespace Chat {
  
 struct ClientInfo {
     std::string username;
+    std::string room = "general";
     std::shared_ptr<SimpleNet::Socket> socket;
 };
  
@@ -30,10 +31,17 @@ private:
 
     bool handleRegister(const Protocol::Message& msg,
                 std::shared_ptr<SimpleNet::Socket> sock);
+
+    void handleJoin(const Protocol::Message& msg);
+
+    void handleRooms(std::shared_ptr<SimpleNet::Socket> sock);
+
+    void handleCreateRoom(const Protocol::Message& msg, bool isPrivate);
  
     void handleText(const Protocol::Message& msg);
  
     void broadcast(const Protocol::Message& msg);
+    void broadcastToRoom(const std::string& room, const Protocol::Message& msg);
  
     bool sendTo(const std::string& username, const Protocol::Message& msg);
  

@@ -22,6 +22,7 @@ private:
     std::string host_;
     int port_;
     std::string username_;
+    std::string current_room_ = "general";
  
     SimpleNet::Socket socket_;
  

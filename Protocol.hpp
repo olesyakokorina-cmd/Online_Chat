@@ -9,6 +9,10 @@ namespace Protocol {
 enum class MessageType {
     LOGIN,
     REGISTER,
+    JOIN,
+    ROOMS,
+    CREATE_ROOM,
+    CREATE_PRIVATE_ROOM,
     TEXT,
     SYSTEM,
     ERROR
@@ -18,6 +22,7 @@ struct Message {
     MessageType type;
     std::string from;
     std::string to;
+    std::string room;
     std::string body;
 };
 
@@ -31,7 +36,11 @@ bool recvMessage(SimpleNet::Socket& sock, Message& out);
  
 Message makeLogin(const std::string& username, const std::string& password);
 Message makeRegister(const std::string& username, const std::string& password);
-Message makeText(const std::string& from, const std::string& to, const std::string& body);
+Message makeJoin(const std::string& username, const std::string& room, const std::string& code = "");
+Message makeRoomsRequest(const std::string& username);
+Message makeCreateRoom(const std::string& username, const std::string& room);
+Message makeCreatePrivateRoom(const std::string& username, const std::string& room, const std::string& password);
+Message makeText(const std::string& from, const std::string& to, const std::string& room, const std::string& body);
 Message makeSystem(const std::string& body);
 Message makeError(const std::string& reason);
  

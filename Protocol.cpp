@@ -27,6 +27,10 @@ static std::string typeToString(MessageType type) {
     switch (type) {
         case MessageType::LOGIN:   return "LOGIN";
         case MessageType::REGISTER: return "REGISTER";
+        case MessageType::JOIN: return "JOIN";
+        case MessageType::ROOMS: return "ROOMS";
+        case MessageType::CREATE_ROOM: return "CREATE_ROOM";
+        case MessageType::CREATE_PRIVATE_ROOM: return "CREATE_PRIVATE_ROOM";
         case MessageType::TEXT:   return "TEXT";
         case MessageType::SYSTEM: return "SYSTEM";
         case MessageType::ERROR:  return "ERROR";
@@ -37,6 +41,10 @@ static std::string typeToString(MessageType type) {
 static MessageType stringToType(const std::string& s) {
     if (s == "LOGIN")   return MessageType::LOGIN;
     if (s == "REGISTER") return MessageType::REGISTER;
+    if (s == "JOIN") return MessageType::JOIN;
+    if (s == "ROOMS") return MessageType::ROOMS;
+    if (s == "CREATE_ROOM") return MessageType::CREATE_ROOM;
+    if (s == "CREATE_PRIVATE_ROOM") return MessageType::CREATE_PRIVATE_ROOM;
     if (s == "TEXT")   return MessageType::TEXT;
     if (s == "SYSTEM") return MessageType::SYSTEM;
     if (s == "ERROR")  return MessageType::ERROR;
@@ -50,6 +58,7 @@ std::string serialize(const Message& msg) {
     result += encodeField(typeToString(msg.type));
     result += encodeField(msg.from);
     result += encodeField(msg.to);
+    result += encodeField(msg.room);
     result += encodeField(msg.body);
     return result;
 }
@@ -60,6 +69,7 @@ Message deserialize(const std::string& raw) {
     msg.type = stringToType(decodeField(raw, pos));
     msg.from = decodeField(raw, pos);
     msg.to   = decodeField(raw, pos);
+    msg.room = decodeField(raw, pos);
     msg.body = decodeField(raw, pos);
     return msg;
 }
@@ -115,23 +125,39 @@ bool recvMessage(SimpleNet::Socket& sock, Message& out) {
 }
  
 Message makeLogin(const std::string& username, const std::string& password) {
-    return { MessageType::LOGIN, username, "", password };
+    return { MessageType::LOGIN, username, "", "", password };
 }
  
 Message makeRegister(const std::string& username, const std::string& password) {
-    return { MessageType::REGISTER, username, "", password };
+    return { MessageType::REGISTER, username, "", "", password };
 }
- 
-Message makeText(const std::string& from, const std::string& to, const std::string& body) {
-    return { MessageType::TEXT, from, to, body };
+
+Message makeJoin(const std::string& username, const std::string& room, const std::string& code) {
+    return { MessageType::JOIN, username, "", room, code };
+}
+
+Message makeRoomsRequest(const std::string& username) {
+    return { MessageType::ROOMS, username, "", "", "" };
+}
+
+Message makeCreateRoom(const std::string& username, const std::string& room) {
+    return { MessageType::CREATE_ROOM, username, "", room, "" };
+}
+
+Message makeCreatePrivateRoom(const std::string& username, const std::string& room, const std::string& password) {
+    return { MessageType::CREATE_PRIVATE_ROOM, username, "", room, password };
+}
+
+Message makeText(const std::string& from, const std::string& to, const std::string& room, const std::string& body) {
+    return { MessageType::TEXT, from, to, room, body };
 }
  
 Message makeSystem(const std::string& body) {
-    return { MessageType::SYSTEM, "SERVER", "ALL", body };
+    return { MessageType::SYSTEM, "SERVER", "ALL", "", body };
 }
  
 Message makeError(const std::string& reason) {
-    return { MessageType::ERROR, "SERVER", "", reason };
+    return { MessageType::ERROR, "SERVER", "", "", reason };
 }
  
 } // namespace Protocol
